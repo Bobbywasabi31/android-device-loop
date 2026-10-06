@@ -1,0 +1,54 @@
+# DRAFT — sketch only, do not enable yet.
+#
+# Blockers before this can run:
+#   1. `android auth login` is interactive — need the non-interactive /
+#      service-account auth story from the docs (TODO).
+#   2. GCP_PROJECT secret must be a project with device streaming enabled.
+#   3. Verify every CLI command spelling (see TODOs in scripts/stream-loop.sh).
+#   4. Decide the cost policy: 30 free min/project/month, then $0.15/min.
+#      workflow_dispatch only (no push trigger) until that's settled.
+#
+# When unblocked, the real version would: install the CLI, build the APK
+# with Gradle, then run scripts/stream-loop.sh and upload artifacts/.
+
+name: device-loop
+
+on:
+  workflow_dispatch: # manual only — cost control until auth + billing are settled
+
+jobs:
+  stream:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20 # keep reservations short: billed while reserved
+    steps:
+      - uses: actions/checkout@v4
+
+      # TODO: install Android CLI on the runner.
+      # Download: https://developer.android.com/tools/agents
+      # - name: Install Android CLI
+      #   run: |
+      #     curl -fsSL <TODO: official download URL> -o android-cli.zip
+      #     unzip android-cli.zip -d /opt/android-cli
+      #     echo "/opt/android-cli/bin" >> "$GITHUB_PATH"
+
+      # TODO: non-interactive auth. `android auth login` opens a browser flow.
+      # Check the docs for a CI/service-account/token option before writing this step.
+      # - name: Authenticate
+      #   run: android auth login --token "${{ secrets.ANDROID_CLI_TOKEN }}"
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug
+
+      - name: Run device streaming smoke loop
+        env:
+          GCP_PROJECT: ${{ secrets.GCP_PROJECT }}
+          APK: app/build/outputs/apk/debug/app-debug.apk
+          MODEL: ${{ vars.STREAM_MODEL }} # e.g. set repo var after checking `android device remote models`
+        run: bash scripts/stream-loop.sh
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: device-loop-evidence
+          path: artifacts/
