@@ -51,8 +51,9 @@ adb install -r "$APK"
 log "installed $APK"
 
 # 4. Launch the app
-# TODO: confirm Throw Assistant's real package / launcher activity
-PKG="com.example.throwassistant"   # TODO: replace with real applicationId
+# Launcher: .MainActivity (exported LAUNCHER; .DemoActivity is not exported)
+# applicationId verified from overlay-app/app/build.gradle (2026-10-07)
+PKG="com.bobbywasabi.overlayapp"
 adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1
 sleep 3
 
