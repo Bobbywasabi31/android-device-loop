@@ -57,9 +57,8 @@ adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1
 sleep 3
 
 # 5. Evidence: screenshot + UI tree + logcat
-# TODO: verify `android screen` subcommand spelling (release notes show `android screen`
-#       with --annotate; third-party refs show `android screen capture --annotate`)
-android screen --annotate -o "${ARTIFACTS}/launch.png" || \
+# `android screen capture` (verified via android-cli SKILL.md references, 2026-10-06)
+android screen capture --annotate -o "${ARTIFACTS}/launch.png" || \
   adb exec-out screencap -p > "${ARTIFACTS}/launch.png"
 android layout --pretty > "${ARTIFACTS}/layout.txt" 2>/dev/null || true
 adb logcat -d > "${ARTIFACTS}/logcat.txt"

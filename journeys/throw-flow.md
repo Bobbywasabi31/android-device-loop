@@ -48,7 +48,7 @@ Journey definition (XML — the documented format):
 
 Evidence to pull after the run (regardless of pass/fail):
 
-- `android screen --annotate -o journey-end.png` (TODO: verify subcommand)
+- `android screen capture --annotate -o journey-end.png`
 - `adb logcat -d` filtered on the app's package/tag
 - `android layout --pretty` if a step's assertion is disputed
 

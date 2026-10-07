@@ -35,17 +35,21 @@ Verified:
 - "Remote devices are billed to a Google Cloud project."
 - Set a default once in `~/.androidrc` (Windows: `%USERPROFILE%\.androidrc`):
   `device remote --project my-project-id`
-- Sources: [command reference](https://developer.android.com/tools/agents/android-cli/commands/device_remote),
+- **No billing required for the free tier** — the official device-streaming
+  docs say it is "available to you to try at no cost with Firebase projects
+  on a Spark plan. Usage beyond the monthly no cost minutes may incur
+  billing." Billing (Blaze) only kicks in past the free minutes.
+- **The CLI path shares the same quota** — the official device-streaming
+  docs page points to `android device remote` as the non-Studio route into
+  the same Firebase-powered service ("Try Android CLI if you're not using
+  Android Studio"), billed to the same Google Cloud project. So the CLI and
+  Studio routes draw from the project's one monthly quota.
+- Sources: [device streaming docs](https://developer.android.com/studio/run/android-device-streaming),
+  [command reference](https://developer.android.com/tools/agents/android-cli/commands/device_remote),
   [CLI release notes](https://developer.android.com/tools/agents/android-cli/release-notes).
 
 Unknowns (marked, not guessed):
 
-- Whether the CLI path draws from the **same 30-min Spark quota** as
-  Firebase/Android-Studio device streaming. Same backend is likely —
-  verify in the Cloud console before relying on it.
-- Whether the project needs **billing enabled** to stream via CLI.
-  Firebase Spark (no billing) works for the Studio path; CLI docs just say
-  "billed to a Google Cloud project." Unconfirmed.
 - Default reservation length and exact `create` duration flags
   (`extend --duration <minutes>` exists per release notes).
 
@@ -79,7 +83,7 @@ android device remote create <codename>/<api> --project=$GCP_PROJECT
 adb install -r app-debug.apk
 # ... run journey steps, capture evidence ...
 adb logcat -d > logcat.txt
-android screen -o shot.png            # TODO: verify subcommand spelling
+android screen capture -o shot.png
 android device remote disconnect <reservation-id> --project=$GCP_PROJECT
 android device remote remove <reservation-id> --project=$GCP_PROJECT
 ```
@@ -116,7 +120,9 @@ owning the hardware. Same loop, different journey file.
 ## Open TODOs
 
 - [ ] Confirm `create` output format (how the reservation id is returned)
-- [ ] Confirm `android screen` subcommand spelling (`capture`? flags?)
-- [ ] Confirm billing requirement on the GCP project
+- [x] Confirm `android screen` subcommand spelling (`capture`? flags?) — verified 2026-10-06: `android screen capture -o shot.png`, `--annotate` flag supported (4 independent android-cli references agree)
+- [x] Confirm billing requirement on the GCP project — not required for the
+  free tier; Spark (no billing) works, billing (Blaze) only past free minutes
 - [ ] Non-interactive auth story for CI (`android auth login` is interactive)
-- [ ] Verify the 30-min Spark quota applies to CLI streaming
+- [x] Verify the 30-min Spark quota applies to CLI streaming — yes, CLI is
+  the same Firebase device-streaming service and shares the project quota
