@@ -48,14 +48,19 @@ Journey definition (XML — the documented format):
 
 Evidence to pull after the run (regardless of pass/fail):
 
-- `android screen capture --annotate -o journey-end.png`
+- `android screen capture --annotate --output=journey-end.png`
 - `adb logcat -d` filtered on the app's package/tag
-- `android layout --pretty` if a step's assertion is disputed
+- `android layout --pretty --output=layout.json` if a step's assertion is disputed
 
 Notes:
 
 - Steps must be robust to permission-dialog wording differences across
   API levels — prefer "verify visible" assertions over pixel positions.
 - Keep the whole journey under ~5 minutes: the free tier is 30 min/month.
+- (verified 2026-10-07 against CLI 1.0.16500706: `capture` takes `--output=`
+  — no `-o` short flag — and `layout` takes `--pretty` / `--output=`; CLI has
+  no `journey` subcommand, so the agent drives each step itself: capture an
+  annotated screenshot, then `android screen resolve --screenshot=<png>
+  --string="input tap #3"` to substitute #N labels into real coordinates.)
 - What this does NOT cover: actual ring detection against gameplay.
   That still needs a real phone with the game running (see README).

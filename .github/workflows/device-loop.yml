@@ -1,10 +1,14 @@
 # DRAFT — sketch only, do not enable yet.
 #
 # Blockers before this can run:
-#   1. `android auth login` is interactive — need the non-interactive /
-#      service-account auth story from the docs (TODO).
+#   1. `android auth login` is interactive — VERIFIED 2026-10-07 against CLI
+#      1.0.16500706: no token/service-account flag exists (only
+#      --no-use-keyring), so CI auth is a genuine open question. Needs Alex's
+#      GCP project anyway (blocker 2).
 #   2. GCP_PROJECT secret must be a project with device streaming enabled.
-#   3. Verify every CLI command spelling (see TODOs in scripts/stream-loop.sh).
+#   3. DONE 2026-10-07: every CLI command spelling verified against the
+#      installed CLI 1.0.16500706 --help + bundled docs KB. Notable fix:
+#      `android screen capture` takes --output= (there is NO -o short flag).
 #   4. Decide the cost policy: 30 free min/project/month, then $0.15/min.
 #      workflow_dispatch only (no push trigger) until that's settled.
 #
@@ -23,18 +27,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # TODO: install Android CLI on the runner.
-      # Download: https://developer.android.com/tools/agents
+      # Official install (verified 2026-10-07; install.sh puts the binary in
+      # ~/.local/bin and appends it to PATH in .bashrc):
       # - name: Install Android CLI
       #   run: |
-      #     curl -fsSL <TODO: official download URL> -o android-cli.zip
-      #     unzip android-cli.zip -d /opt/android-cli
-      #     echo "/opt/android-cli/bin" >> "$GITHUB_PATH"
+      #     curl -fsSL https://dl.google.com/android/cli/latest/linux_x86_64/install.sh -o /tmp/android-cli-install.sh
+      #     bash /tmp/android-cli-install.sh
+      #     echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      # TODO: non-interactive auth. `android auth login` opens a browser flow.
-      # Check the docs for a CI/service-account/token option before writing this step.
+      # TODO: non-interactive auth. `android auth login` opens a browser flow
+      # and has no --token/service-account flag (verified CLI 1.0.16500706).
+      # Do not invent a flag — needs Alex's GCP project + auth story.
       # - name: Authenticate
-      #   run: android auth login --token "${{ secrets.ANDROID_CLI_TOKEN }}"
+      #   run: android auth login
 
       - name: Build debug APK
         run: ./gradlew assembleDebug

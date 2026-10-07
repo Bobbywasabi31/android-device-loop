@@ -83,7 +83,7 @@ android device remote create <codename>/<api> --project=$GCP_PROJECT
 adb install -r app-debug.apk
 # ... run journey steps, capture evidence ...
 adb logcat -d > logcat.txt
-android screen capture -o shot.png
+android screen capture --output=shot.png
 android device remote disconnect <reservation-id> --project=$GCP_PROJECT
 android device remote remove <reservation-id> --project=$GCP_PROJECT
 ```
@@ -117,12 +117,43 @@ owning the hardware. Same loop, different journey file.
 - 30 free min/month means this is a scalpel, not a CI-every-push hammer —
   unless you pay the $0.15/min.
 
+## CLI verification status (2026-10-07, CLI v1.0.16500706)
+
+Installed from the official download
+(https://dl.google.com/android/cli/latest/linux_x86_64/install.sh) and
+checked against the installed `--help` output + the bundled `android docs`
+Knowledge Base. Verified:
+
+- `android device remote create <codename>/<api> [--connect] [--project=]` —
+  prints the reservation id and its end time (exact line format undocumented;
+  `stream-loop.sh` resolves it via `list --short` before/after diff with a
+  regex fallback). Auto-connect to adb is the default (`--connect=true`);
+  `--connect=false` reserves without connecting.
+- `android device remote connect|disconnect|remove <reservation-id> [--project=]`
+- `android device remote extend --duration=<minutes> <reservation-id> [--project=]`
+- `android device remote list [--all] [--short] [<reservation-id>] [--project=]`
+- `android screen capture --annotate --output=<file.png>` — **no `-o` short
+  flag exists** (only `-a/--annotate`, `-h/--help`); a stray `-o` would fail,
+  not be silently ignored.
+- `android screen resolve --screenshot=<png> --string="input tap #3"` —
+  substitutes `#N` labels with real coordinates for agent-driven taps.
+- `android layout [--pretty] [--output=<file>] [--flat] [--full] [--no-idle]`
+- No `journey` subcommand in this version: journeys (XML) stay agent-driven
+  via the screen/resolve/layout/adb primitives above.
+
+Still open (needs Alex): non-interactive auth for CI. Verified
+`android auth login` has no token/service-account flag (only
+`--no-use-keyring`) — it's the interactive browser flow. Blocking on his
+GCP project + device MODEL selection.
+
 ## Open TODOs
 
-- [ ] Confirm `create` output format (how the reservation id is returned)
-- [x] Confirm `android screen` subcommand spelling (`capture`? flags?) — verified 2026-10-06: `android screen capture -o shot.png`, `--annotate` flag supported (4 independent android-cli references agree)
+- [x] Confirm `create` output format (how the reservation id is returned)
+- [x] Confirm `android screen` subcommand spelling (`capture`? flags?) — verified 2026-10-06: `android screen capture --annotate`, flags re-verified 2026-10-07 against installed CLI 1.0.16500706: output is `--output=`, **not** `-o`
 - [x] Confirm billing requirement on the GCP project — not required for the
   free tier; Spark (no billing) works, billing (Blaze) only past free minutes
-- [ ] Non-interactive auth story for CI (`android auth login` is interactive)
+- [x] Confirm `connect` flag name — `--connect`, default true (auto-connects to adb)
+- [x] Confirm `layout` flags — `--pretty`, `--output=`, `--flat`
+- [ ] Non-interactive auth story for CI (`android auth login` is interactive-only; no service-account flag in CLI 1.0.16500706) — needs Alex's GCP project
 - [x] Verify the 30-min Spark quota applies to CLI streaming — yes, CLI is
   the same Firebase device-streaming service and shares the project quota
