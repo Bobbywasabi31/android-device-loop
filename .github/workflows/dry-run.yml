@@ -1,0 +1,26 @@
+# Runs the stream-loop in --dry-run mode: full reserve -> push -> install ->
+# capture -> release path against mock android/adb. Needs no device, no GCP
+# project, no auth — so this one runs on every push, unlike device-loop.yml
+# (manual-only until the interactive-auth story is settled).
+
+name: dry-run
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  dry-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Syntax-check scripts
+        run: |
+          bash -n scripts/stream-loop.sh
+          bash -n scripts/dry-run/android
+          bash -n scripts/dry-run/adb
+          bash -n tests/test-dry-run.sh
+
+      - name: Run stream-loop in dry-run mode
+        run: bash tests/test-dry-run.sh

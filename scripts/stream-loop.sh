@@ -14,18 +14,50 @@
 #
 # Usage:
 #   GCP_PROJECT=my-proj APK=app-debug.apk MODEL=panther/34 bash scripts/stream-loop.sh
+#   bash scripts/stream-loop.sh --dry-run   # no device / no GCP project:
+#                                           # full loop against mock android+adb
 
 set -euo pipefail
 
-: "${GCP_PROJECT:?set GCP_PROJECT}"
-: "${APK:?set APK path}"
-: "${MODEL:?set MODEL as <codename>/<api> from 'android device remote models'}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# --dry-run: shadow android+adb with the mocks in scripts/dry-run/ (they record
+# every call and return canned outputs) and relax the env requirements, so the
+# whole reserve -> push -> install -> capture -> release path validates with
+# no device, no GCP project, and no cost.
+DRY_RUN=0
+if [[ "${1:-}" == "--dry-run" ]]; then
+  DRY_RUN=1
+  shift
+fi
+
+if (( DRY_RUN )); then
+  : "${GCP_PROJECT:=dry-run-project}"
+  : "${APK:=dry-run-fixture.apk}"
+  : "${MODEL:=panther/34}"
+  export PATH="$SCRIPT_DIR/dry-run:$PATH"
+else
+  : "${GCP_PROJECT:?set GCP_PROJECT}"
+  : "${APK:?set APK path}"
+  : "${MODEL:?set MODEL as <codename>/<api> from 'android device remote models'}"
+fi
 
 PROJECT_FLAG="--project=${GCP_PROJECT}"
 ARTIFACTS="artifacts/$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$ARTIFACTS"
 
+if (( DRY_RUN )); then
+  export ANDROID_MOCK_STATE="$ARTIFACTS/mock-state"
+  export ANDROID_MOCK_CALLS="$ARTIFACTS/android-calls.log"
+  mkdir -p "$ANDROID_MOCK_STATE"
+  : > "$ANDROID_MOCK_CALLS"
+fi
+
 log() { echo "[stream-loop] $*"; }
+
+if (( DRY_RUN )); then
+  log "DRY RUN — mocking android/adb from scripts/dry-run/: no device, no GCP project, no cost."
+fi
 
 # 0. Auth (one-time per machine; interactive)
 # CLI 1.0.16500706 verified 2026-10-07: `android auth login` has no

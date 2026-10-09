@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+#
+# Mock of `adb` for stream-loop.sh --dry-run.
+#
+# Records every invocation to $ANDROID_MOCK_CALLS and returns canned outputs
+# so the push -> install -> launch -> evidence steps validate with no device.
+
+set -euo pipefail
+
+CALLS="${ANDROID_MOCK_CALLS:?ANDROID_MOCK_CALLS not set}"
+
+# Record the raw invocation (argv joined on spaces) for regression tests.
+printf 'adb %s\n' "$*" >> "$CALLS"
+
+PNG_B64='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+
+case "${1:-}" in
+  wait-for-device)
+    exit 0
+    ;;
+  devices)
+    echo "List of devices attached"
+    echo "dryrun-emulator-5554	device"
+    ;;
+  shell)
+    case "${2:-}" in
+      getprop)
+        case "${3:-}" in
+          ro.product.model) echo "DryRunModel" ;;
+          *) echo "" ;;
+        esac
+        ;;
+      monkey|input|am|pm)
+        # app launch / taps / keyevents: no-op success
+        exit 0
+        ;;
+      *)
+        echo "android-mock-adb: unknown shell subcommand '${2:-}'" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+  install)
+    # adb install [-r] <apk> — accept any flags, succeed if an apk path is given
+    APK="${*: -1}"
+    if [[ -z "$APK" ]]; then
+      echo "android-mock-adb: install: no APK path given" >&2
+      exit 1
+    fi
+    echo "android-mock-adb: installed $APK"
+    ;;
+  exec-out)
+    # adb exec-out screencap -p — emit a minimal valid PNG on stdout
+    printf '%s' "$PNG_B64" | base64 -d
+    ;;
+  logcat)
+    echo "--------- beginning of main"
+    echo "01-01 00:00:00.000  1000  1000 I DryRun: mock logcat line 1"
+    echo "01-01 00:00:01.000  1000  1000 I DryRun: mock logcat line 2"
+    ;;
+  *)
+    echo "android-mock-adb: unknown subcommand '${1:-}'" >&2
+    exit 1
+    ;;
+esac

@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+#
+# Mock of the Android CLI (`android`) for stream-loop.sh --dry-run.
+#
+# Records every invocation to $ANDROID_MOCK_CALLS and returns canned outputs
+# with a tiny bit of state ($ANDROID_MOCK_STATE/reservations.txt) so the
+# reserve -> release lifecycle can be validated end to end with no device,
+# no GCP project, and no cost.
+#
+# Where a spelling is verified against the real CLI (2026-10-07, CLI
+# v1.0.16500706), the mock enforces it the way the real CLI would — e.g.
+# `screen capture` takes --output= and has NO -o short flag, so passing -o
+# exits nonzero instead of silently falling through. That is what lets
+# tests/test-dry-run.sh catch spelling regressions like the task-7 bug.
+
+set -euo pipefail
+
+STATE="${ANDROID_MOCK_STATE:?ANDROID_MOCK_STATE not set}"
+CALLS="${ANDROID_MOCK_CALLS:?ANDROID_MOCK_CALLS not set}"
+RESERVATIONS="$STATE/reservations.txt"
+touch "$RESERVATIONS"
+
+# Record the raw invocation (argv joined on spaces) for regression tests.
+printf 'android %s\n' "$*" >> "$CALLS"
+
+# Minimal valid 1x1 PNG, written wherever a screenshot file is requested.
+PNG_B64='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+write_png() { printf '%s' "$PNG_B64" | base64 -d > "$1"; }
+
+case "${1:-}" in
+  device)
+    case "${2:-}" in
+      remote)
+        case "${3:-}" in
+          create)
+            # android device remote create <codename/api> [--connect] [--project=...]
+            MODEL="${4:-}"
+            if [[ -z "$MODEL" || "$MODEL" == -* ]]; then
+              echo "android-mock: create: expected <codename/api> model, got '${MODEL}'" >&2
+              exit 1
+            fi
+            if [[ ! "$MODEL" =~ ^[a-zA-Z0-9_-]+/[0-9]+$ ]]; then
+              echo "android-mock: create: model must look like <codename>/<api>, got '${MODEL}'" >&2
+              exit 1
+            fi
+            N=$(( $(wc -l < "$RESERVATIONS") + 1 ))
+            ID="dryrun-reservation-$N"
+            echo "$ID" >> "$RESERVATIONS"
+            echo "Created device reservation $ID (model $MODEL, ends at 2030-01-01T00:00:00Z)"
+            echo "Connected to adb."
+            ;;
+          connect)
+            echo "android-mock: connected reservation ${4:-<missing-id>} to adb."
+            ;;
+          list)
+            # android device remote list [--short] [--all] [<id>] [--project=...]
+            cat "$RESERVATIONS"
+            ;;
+          disconnect|remove)
+            ID="${4:-}"
+            if [[ -z "$ID" ]]; then
+              echo "android-mock: $3: reservation id required" >&2
+              exit 1
+            fi
+            grep -vxF "$ID" "$RESERVATIONS" > "$RESERVATIONS.tmp" || true
+            mv "$RESERVATIONS.tmp" "$RESERVATIONS"
+            echo "android-mock: $3 $ID OK"
+            ;;
+          *)
+            echo "android-mock: unknown 'device remote' subcommand '${3:-}'" >&2
+            exit 1
+            ;;
+        esac
+        ;;
+      *)
+        echo "android-mock: unknown 'device' subcommand '${2:-}'" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+  screen)
+    case "${2:-}" in
+      capture)
+        # android screen capture [--annotate|-a] --output=<file.png>
+        # Verified 2026-10-07: there is NO -o short flag.
+        OUT="" ANNOTATE=0
+        for arg in "$@"; do
+          case "$arg" in
+            --output=*) OUT="${arg#--output=}" ;;
+            --output)
+              echo "android-mock: screen capture: --output needs a value (--output=<file>)" >&2
+              exit 2
+              ;;
+            --annotate|-a) ANNOTATE=1 ;;
+            -h|--help) echo "Usage: android screen capture [--annotate] --output=<file.png>"; exit 0 ;;
+            -o*)
+              echo "android-mock: screen capture: unknown flag '$arg' — no -o short flag exists, use --output=" >&2
+              exit 2
+              ;;
+            screen|capture) ;;
+            -*)
+              echo "android-mock: screen capture: unknown flag '$arg'" >&2
+              exit 2
+              ;;
+          esac
+        done
+        if [[ -z "$OUT" ]]; then
+          echo "android-mock: screen capture: --output= is required" >&2
+          exit 2
+        fi
+        write_png "$OUT"
+        echo "android-mock: captured $OUT (annotate=$ANNOTATE)"
+        ;;
+      resolve)
+        # android screen resolve --screenshot=<png> --string="tap #3"
+        echo "adb shell input tap 512 384"
+        ;;
+      *)
+        echo "android-mock: unknown 'screen' subcommand '${2:-}'" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+  layout)
+    # android layout [--pretty] --output=<file>
+    OUT=""
+    for arg in "$@"; do
+      case "$arg" in
+        --output=*) OUT="${arg#--output=}" ;;
+        --output)
+          echo "android-mock: layout: --output needs a value (--output=<file>)" >&2
+          exit 2
+          ;;
+        -o*)
+          echo "android-mock: layout: unknown flag '$arg' — use --output=" >&2
+          exit 2
+          ;;
+      esac
+    done
+    if [[ -n "$OUT" ]]; then
+      cat > "$OUT" <<'EOF'
+<?xml version="1.0" encoding="utf-8"?>
+<node index="0" class="android.widget.FrameLayout" package="com.bobbywasabi.overlayapp" text="" bounds="[0,0][1080,2400]">
+  <node index="0" class="android.widget.TextView" resource-id="mock:label" text="DryRunModel" bounds="[100,100][980,300]" />
+</node>
+EOF
+    else
+      echo "android-mock: layout dump (stdout fallback)"
+    fi
+    ;;
+  *)
+    echo "android-mock: unknown command '${1:-}'" >&2
+    exit 1
+    ;;
+esac

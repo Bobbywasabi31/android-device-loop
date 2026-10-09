@@ -88,6 +88,27 @@ android device remote disconnect <reservation-id> --project=$GCP_PROJECT
 android device remote remove <reservation-id> --project=$GCP_PROJECT
 ```
 
+### Dry run — validate the loop with no device and no GCP project
+
+```bash
+bash scripts/stream-loop.sh --dry-run
+```
+
+This runs the full reserve → push → install → capture → release path against
+mock `android` and `adb` binaries in `scripts/dry-run/`: every CLI invocation
+is recorded in `artifacts/<ts>/android-calls.log`, canned outputs stand in
+for the real service, and mock reservation state lives in
+`artifacts/<ts>/mock-state/` (the test asserts it is empty at the end, i.e.
+the device was actually released). No cost, no auth, no GCP project.
+
+The mocks enforce the CLI spellings verified 2026-10-07 the way the real CLI
+would — notably `screen capture` takes `--output=` and has **no `-o` short
+flag**, so if the spelling ever regresses (the task-7 bug), the mock fails,
+the script falls back to `adb exec-out screencap`, and
+`tests/test-dry-run.sh` goes red. CI runs the test on every push
+(`.github/workflows/dry-run.yml`); the real-device workflow
+(`device-loop.yml`) stays manual-only until the auth story is settled.
+
 ## Journeys
 
 Journeys = natural-language user flows the **agent** executes against the
@@ -157,3 +178,8 @@ GCP project + device MODEL selection.
 - [ ] Non-interactive auth story for CI (`android auth login` is interactive-only; no service-account flag in CLI 1.0.16500706) — needs Alex's GCP project
 - [x] Verify the 30-min Spark quota applies to CLI streaming — yes, CLI is
   the same Firebase device-streaming service and shares the project quota
+- [x] `--dry-run` mode for stream-loop.sh (2026-10-09) — mock `android`/`adb`
+  in scripts/dry-run/ record calls and return canned outputs; the mock
+  rejects `-o` like the real CLI, so tests/test-dry-run.sh catches spelling
+  regressions (e.g. the task-7 `--output=` bug) before they ship; CI runs it
+  on every push (.github/workflows/dry-run.yml)
