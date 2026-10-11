@@ -1,8 +1,0 @@
-android device remote list --short --project=dry-run-project
-android device remote create panther/34 --connect --project=dry-run-project
-android device remote list --short --project=dry-run-project
-adb wait-for-device
-adb shell getprop ro.product.model
-adb install -r dry-run-fixture.apk
-android device remote disconnect dryrun-reservation-1 --project=dry-run-project
-android device remote remove dryrun-reservation-1 --project=dry-run-project
