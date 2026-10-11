@@ -84,6 +84,20 @@ fi
 : "${RES_ID:?could not resolve reservation id; see ${ARTIFACTS}/create-output.txt}"
 log "reservation id: ${RES_ID}"
 
+# ALWAYS release the reservation, even if the loop dies midway: a failed
+# install (or any later step) under `set -e` would otherwise leave the device
+# reserved and burning the billed/free streaming minutes. Registered here —
+# only once RES_ID is actually known — and idempotent via `|| true`.
+release_device() {
+  if [[ -n "${RES_ID:-}" ]]; then
+    log "releasing reservation ${RES_ID} ..."
+    android device remote disconnect "${RES_ID}" ${PROJECT_FLAG} || true
+    android device remote remove "${RES_ID}" ${PROJECT_FLAG} || true
+    log "reservation ${RES_ID} released."
+  fi
+}
+trap release_device EXIT
+
 # 2. Wait for adb (create auto-connects the device; this just blocks until ready).
 adb wait-for-device
 log "device online: $(adb shell getprop ro.product.model)"
@@ -116,8 +130,7 @@ log "evidence in ${ARTIFACTS}/"
 # --string="tap #3"` to substitute #N labels into adb shell input commands.
 # `android layout --pretty` gives the UI tree when a step needs exact ids.
 
-# 7. ALWAYS release the device — billed while reserved.
-log "releasing device ..."
-android device remote disconnect "${RES_ID}" ${PROJECT_FLAG} || true
-android device remote remove "${RES_ID}" ${PROJECT_FLAG} || true
+# 7. Release is handled by the release_device EXIT trap (registered right
+# after the reservation id resolved) — it runs on success AND on any mid-loop
+# failure, so the device is never left reserved and burning streaming minutes.
 log "done. artifacts: ${ARTIFACTS}/"

@@ -81,4 +81,32 @@ RES="$LATEST/mock-state/reservations.txt"
 [ -s "$RES" ] && fail "reservation was NOT released: $(cat "$RES")"
 pass "reservation released (mock state empty)"
 
+# --- part 3: mid-loop failure still releases the reservation ---------------
+# A failed install (or any step) under set -e must not leave the device
+# reserved and burning streaming minutes — the EXIT trap must run
+# disconnect + remove on the failure path.
+rm -rf artifacts
+export ANDROID_MOCK_FAIL_AT="install -r"
+if bash scripts/stream-loop.sh --dry-run > /tmp/dry-run-fail-stdout.txt 2>&1; then
+  unset ANDROID_MOCK_FAIL_AT
+  cat /tmp/dry-run-fail-stdout.txt >&2
+  fail "stream-loop.sh --dry-run exited 0 with a failing install"
+fi
+unset ANDROID_MOCK_FAIL_AT
+pass "loop exits nonzero when install fails"
+
+LATEST="$(ls -dt artifacts/*/ 2>/dev/null | head -1)"
+[ -n "$LATEST" ] || fail "no artifacts dir created on the failure path"
+[ -f "$LATEST/android-calls.log" ] || fail "android-calls.log missing on the failure path"
+grep -q '^android device remote disconnect dryrun-reservation-1' "$LATEST/android-calls.log" \
+  || fail "EXIT trap did not run disconnect on the failure path"
+grep -q '^android device remote remove dryrun-reservation-1' "$LATEST/android-calls.log" \
+  || fail "EXIT trap did not run remove on the failure path"
+pass "EXIT trap ran disconnect + remove on the failure path"
+
+RES="$LATEST/mock-state/reservations.txt"
+[ -f "$RES" ] || fail "mock state missing on the failure path"
+[ -s "$RES" ] && fail "reservation NOT released after mid-loop failure: $(cat "$RES")"
+pass "reservation released after mid-loop failure (mock state empty)"
+
 echo "ALL DRY-RUN CHECKS PASSED"

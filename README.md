@@ -109,6 +109,14 @@ the script falls back to `adb exec-out screencap`, and
 (`.github/workflows/dry-run.yml`); the real-device workflow
 (`device-loop.yml`) stays manual-only until the auth story is settled.
 
+The loop also never leaves a device reserved on failure: `stream-loop.sh`
+registers an `EXIT` trap right after the reservation id resolves, so
+`disconnect` + `remove` run on success **and** on any mid-loop failure —
+a failed `install` under `set -e` would otherwise leave the device reserved
+and burning streaming minutes. The test covers the failure path via
+`ANDROID_MOCK_FAIL_AT` (understood by both mocks), asserting the loop exits
+nonzero while mock reservation state still ends up empty.
+
 ## Journeys
 
 Journeys = natural-language user flows the **agent** executes against the

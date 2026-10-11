@@ -12,6 +12,15 @@ CALLS="${ANDROID_MOCK_CALLS:?ANDROID_MOCK_CALLS not set}"
 # Record the raw invocation (argv joined on spaces) for regression tests.
 printf 'adb %s\n' "$*" >> "$CALLS"
 
+# Failure injection for testing: ANDROID_MOCK_FAIL_AT="<substring>" makes the
+# mock exit 1 when the invocation contains the substring — e.g.
+# ANDROID_MOCK_FAIL_AT="install -r" simulates an install failure.
+# Used by tests/test-dry-run.sh to exercise the stream-loop.sh failure paths.
+if [[ -n "${ANDROID_MOCK_FAIL_AT:-}" && "$*" == *"$ANDROID_MOCK_FAIL_AT"* ]]; then
+  echo "android-mock-adb: failing as requested (ANDROID_MOCK_FAIL_AT='${ANDROID_MOCK_FAIL_AT}')" >&2
+  exit 1
+fi
+
 PNG_B64='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
 
 case "${1:-}" in

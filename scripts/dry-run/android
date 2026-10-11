@@ -23,6 +23,15 @@ touch "$RESERVATIONS"
 # Record the raw invocation (argv joined on spaces) for regression tests.
 printf 'android %s\n' "$*" >> "$CALLS"
 
+# Failure injection for testing: ANDROID_MOCK_FAIL_AT="<substring>" makes the
+# mock exit 1 when the invocation contains the substring — e.g.
+# ANDROID_MOCK_FAIL_AT="device remote create" simulates a reservation failure.
+# Used by tests/test-dry-run.sh to exercise the stream-loop.sh failure paths.
+if [[ -n "${ANDROID_MOCK_FAIL_AT:-}" && "$*" == *"$ANDROID_MOCK_FAIL_AT"* ]]; then
+  echo "android-mock: failing as requested (ANDROID_MOCK_FAIL_AT='${ANDROID_MOCK_FAIL_AT}')" >&2
+  exit 1
+fi
+
 # Minimal valid 1x1 PNG, written wherever a screenshot file is requested.
 PNG_B64='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
 write_png() { printf '%s' "$PNG_B64" | base64 -d > "$1"; }
