@@ -18,8 +18,9 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 pass() { echo "ok: $*"; }
 
 # --- part 1: mock unit checks -------------------------------------------
-export ANDROID_MOCK_STATE="$(mktemp -d)"
-export ANDROID_MOCK_CALLS="$(mktemp)"
+ANDROID_MOCK_STATE="$(mktemp -d)"
+ANDROID_MOCK_CALLS="$(mktemp)"
+export ANDROID_MOCK_STATE ANDROID_MOCK_CALLS
 
 ./scripts/dry-run/android screen capture -o /tmp/should-fail.png 2>/dev/null \
   && fail "mock accepted '-o' — must reject like the real CLI"

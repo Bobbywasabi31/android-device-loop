@@ -22,5 +22,14 @@ jobs:
           bash -n scripts/dry-run/adb
           bash -n tests/test-dry-run.sh
 
+      - name: Lint scripts with shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck --severity=warning --shell=bash \
+            scripts/stream-loop.sh \
+            scripts/dry-run/android \
+            scripts/dry-run/adb \
+            tests/test-dry-run.sh
+
       - name: Run stream-loop in dry-run mode
         run: bash tests/test-dry-run.sh
