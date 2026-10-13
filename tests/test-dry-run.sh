@@ -110,4 +110,32 @@ RES="$LATEST/mock-state/reservations.txt"
 [ -s "$RES" ] && fail "reservation NOT released after mid-loop failure: $(cat "$RES")"
 pass "reservation released after mid-loop failure (mock state empty)"
 
+# --- part 4: --help + unknown flags ---------------------------------------
+# A bare `stream-loop.sh` (no env) dies on the GCP_PROJECT guard with no
+# guidance; --help must document usage before any requirement is enforced,
+# and typos/mistakes must fail loudly instead of silently running the loop.
+bash scripts/stream-loop.sh --help > /tmp/dry-run-help.txt 2>&1 \
+  || fail "stream-loop.sh --help exited nonzero"
+for want in GCP_PROJECT APK MODEL --dry-run '1. reserve'; do
+  grep -q -- "$want" /tmp/dry-run-help.txt \
+    || fail "--help output missing '$want'"
+done
+pass "--help exits 0 and documents env, flags, and steps"
+
+bash scripts/stream-loop.sh -h > /tmp/dry-run-h.txt 2>&1 \
+  || fail "stream-loop.sh -h exited nonzero"
+pass "-h is an alias for --help"
+
+bash scripts/stream-loop.sh --bogus > /tmp/dry-run-bogus.txt 2>&1 \
+  && fail "stream-loop.sh --bogus exited 0 — unknown flags must be rejected"
+grep -q "unknown flag '--bogus'" /tmp/dry-run-bogus.txt \
+  || fail "unknown-flag error message missing"
+pass "unknown flag rejected (exit 2, error names the flag)"
+
+bash scripts/stream-loop.sh positional > /tmp/dry-run-positional.txt 2>&1 \
+  && fail "stream-loop.sh positional exited 0 — positional args must be rejected"
+grep -q "unexpected argument 'positional'" /tmp/dry-run-positional.txt \
+  || fail "unexpected-argument error message missing"
+pass "positional argument rejected (exit 2, error names it)"
+
 echo "ALL DRY-RUN CHECKS PASSED"

@@ -92,6 +92,7 @@ android device remote remove <reservation-id> --project=$GCP_PROJECT
 
 ```bash
 bash scripts/stream-loop.sh --dry-run
+bash scripts/stream-loop.sh --help        # usage: env vars, flags, and steps
 ```
 
 This runs the full reserve → push → install → capture → release path against

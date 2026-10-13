@@ -26,10 +26,43 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # whole reserve -> push -> install -> capture -> release path validates with
 # no device, no GCP project, and no cost.
 DRY_RUN=0
-if [[ "${1:-}" == "--dry-run" ]]; then
-  DRY_RUN=1
-  shift
-fi
+usage() {
+  cat <<'EOF'
+stream-loop.sh — example real-device smoke loop for Throw Assistant
+via Android CLI device streaming.
+
+Usage:
+  GCP_PROJECT=my-proj APK=app-debug.apk MODEL=panther/34 bash scripts/stream-loop.sh
+  bash scripts/stream-loop.sh --dry-run     # full loop against mock android+adb:
+                                            # no device, no GCP project, no cost
+  bash scripts/stream-loop.sh --help        # this text
+
+Env (required unless --dry-run):
+  GCP_PROJECT   Google Cloud project id with device streaming enabled
+  APK           path to the debug APK to test
+  MODEL         device as <codename>/<api>, e.g. panther/34 — pick a real one
+                from `android device remote models`, don't guess
+
+Flags:
+  --dry-run     run the whole loop against the mocks in scripts/dry-run/
+  --help, -h    print this help and exit 0
+
+Steps:
+  1. reserve a real device (billed while reserved — keep it short)
+  2. wait for adb, 3. install the APK, 4. launch the app,
+  5. capture evidence (screenshot, UI layout, logcat) into artifacts/<ts>/
+  6. journey steps are agent-driven (see journeys/throw-flow.md)
+  7. the reservation is ALWAYS released via an EXIT trap, even on failure
+EOF
+}
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) DRY_RUN=1 ;;
+    --help|-h) usage; exit 0 ;;
+    -*) echo "stream-loop.sh: error: unknown flag '$arg' (try --help)" >&2; exit 2 ;;
+    *)  echo "stream-loop.sh: error: unexpected argument '$arg' (try --help)" >&2; exit 2 ;;
+  esac
+done
 
 if (( DRY_RUN )); then
   : "${GCP_PROJECT:=dry-run-project}"
