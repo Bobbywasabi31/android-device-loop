@@ -45,6 +45,10 @@ bash scripts/stream-loop.sh --dry-run > /tmp/dry-run-stdout.txt 2>&1 \
   || { cat /tmp/dry-run-stdout.txt >&2; fail "stream-loop.sh --dry-run exited nonzero"; }
 pass "full loop exited 0"
 
+grep -q 'billing guard: capping device steps' /tmp/dry-run-stdout.txt \
+  || fail "billing guard did not engage on the default run"
+pass "billing guard engaged by default (--max-minutes=25)"
+
 LATEST="$(ls -dt artifacts/*/ 2>/dev/null | head -1)"
 [ -n "$LATEST" ] || fail "no artifacts dir created"
 CALLS="$LATEST/android-calls.log"
@@ -116,7 +120,7 @@ pass "reservation released after mid-loop failure (mock state empty)"
 # and typos/mistakes must fail loudly instead of silently running the loop.
 bash scripts/stream-loop.sh --help > /tmp/dry-run-help.txt 2>&1 \
   || fail "stream-loop.sh --help exited nonzero"
-for want in GCP_PROJECT APK MODEL --dry-run '1. reserve'; do
+for want in GCP_PROJECT APK MODEL --dry-run --max-minutes '1. reserve'; do
   grep -q -- "$want" /tmp/dry-run-help.txt \
     || fail "--help output missing '$want'"
 done
@@ -137,5 +141,55 @@ bash scripts/stream-loop.sh positional > /tmp/dry-run-positional.txt 2>&1 \
 grep -q "unexpected argument 'positional'" /tmp/dry-run-positional.txt \
   || fail "unexpected-argument error message missing"
 pass "positional argument rejected (exit 2, error names it)"
+
+# --- part 5: --max-minutes billing guard -----------------------------------
+# Streaming minutes burn while a device is reserved. A hung adb must not pin
+# the reservation forever: the guard KILLs the device steps after N minutes
+# (timeout exit 124) and the EXIT trap still releases the reservation.
+rm -rf artifacts
+export ANDROID_MOCK_HANG_AT="wait-for-device"
+set +e
+bash scripts/stream-loop.sh --dry-run --max-minutes=0.05 > /tmp/dry-run-timeout-stdout.txt 2>&1
+CODE=$?
+set -e
+unset ANDROID_MOCK_HANG_AT
+[ "$CODE" -eq 124 ] || { cat /tmp/dry-run-timeout-stdout.txt >&2; fail "expected exit 124 when the billing guard fires, got $CODE"; }
+pass "billing guard exits 124 on a hung adb"
+
+LATEST="$(ls -dt artifacts/*/ 2>/dev/null | head -1)"
+[ -n "$LATEST" ] || fail "no artifacts dir created on the timeout path"
+grep -q '^adb wait-for-device$' "$LATEST/android-calls.log" \
+  || fail "hang point (adb wait-for-device) not reached"
+grep -q '^android device remote disconnect dryrun-reservation-1' "$LATEST/android-calls.log" \
+  || fail "reservation not disconnected after the billing guard fired"
+grep -q '^android device remote remove dryrun-reservation-1' "$LATEST/android-calls.log" \
+  || fail "reservation not removed after the billing guard fired"
+pass "EXIT trap released the reservation after the billing guard fired"
+
+RES="$LATEST/mock-state/reservations.txt"
+[ -f "$RES" ] || fail "mock state missing on the timeout path"
+[ -s "$RES" ] && fail "reservation leaked after billing-guard timeout: $(cat "$RES")"
+pass "no reservation leaked after billing-guard timeout (mock state empty)"
+
+# --max-minutes validation: non-numeric values and a bare flag are rejected.
+bash scripts/stream-loop.sh --dry-run --max-minutes=bogus > /tmp/dry-run-mm-bogus.txt 2>&1 \
+  && fail "--max-minutes=bogus exited 0 — must be rejected"
+grep -q "must be a non-negative number" /tmp/dry-run-mm-bogus.txt \
+  || fail "bad --max-minutes error message missing"
+pass "--max-minutes=bogus rejected (exit 2)"
+
+bash scripts/stream-loop.sh --dry-run --max-minutes > /tmp/dry-run-mm-bare.txt 2>&1 \
+  && fail "bare --max-minutes exited 0 — must be rejected"
+pass "bare --max-minutes rejected (exit 2)"
+
+# --max-minutes=0 disables the guard: the full loop still runs to completion.
+rm -rf artifacts
+bash scripts/stream-loop.sh --dry-run --max-minutes=0 > /tmp/dry-run-mm0-stdout.txt 2>&1 \
+  || { cat /tmp/dry-run-mm0-stdout.txt >&2; fail "stream-loop.sh --dry-run --max-minutes=0 exited nonzero"; }
+grep -q 'billing guard disabled' /tmp/dry-run-mm0-stdout.txt \
+  || fail "--max-minutes=0 did not report the guard as disabled"
+grep -q 'billing guard: capping' /tmp/dry-run-mm0-stdout.txt \
+  && fail "--max-minutes=0 still capped the run"
+pass "--max-minutes=0 disables the billing guard (loop still exits 0)"
 
 echo "ALL DRY-RUN CHECKS PASSED"

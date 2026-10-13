@@ -21,6 +21,17 @@ if [[ -n "${ANDROID_MOCK_FAIL_AT:-}" && "$*" == *"$ANDROID_MOCK_FAIL_AT"* ]]; th
   exit 1
 fi
 
+# Hang injection for testing: ANDROID_MOCK_HANG_AT="<substring>" makes the
+# mock sleep instead of answering when the invocation contains the substring —
+# e.g. ANDROID_MOCK_HANG_AT="wait-for-device" simulates a hung adb. Used by
+# tests/test-dry-run.sh to exercise stream-loop.sh's --max-minutes billing
+# guard. Self-limiting (never sleeps forever) so a broken guard can't wedge
+# the test suite.
+if [[ -n "${ANDROID_MOCK_HANG_AT:-}" && "$*" == *"$ANDROID_MOCK_HANG_AT"* ]]; then
+  echo "android-mock-adb: hanging as requested (ANDROID_MOCK_HANG_AT='${ANDROID_MOCK_HANG_AT}')" >&2
+  sleep 15
+fi
+
 PNG_B64='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
 
 case "${1:-}" in

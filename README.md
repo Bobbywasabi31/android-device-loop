@@ -118,6 +118,15 @@ and burning streaming minutes. The test covers the failure path via
 `ANDROID_MOCK_FAIL_AT` (understood by both mocks), asserting the loop exits
 nonzero while mock reservation state still ends up empty.
 
+A hung `adb`/`android` CLI gets the same treatment via the billing guard:
+`--max-minutes=N` (default 25) caps the device-facing steps with coreutils
+`timeout` — streaming minutes burn while a device is reserved (30 free
+min/project/month, then $0.15/min), so one stuck run can never eat the whole
+quota. On expiry the steps are terminated, the script exits 124, and the
+`EXIT` trap still releases the reservation; `0` disables the guard. The test
+covers the timeout path via `ANDROID_MOCK_HANG_AT` (the mock sleeps instead
+of answering), asserting exit 124 and an empty mock reservation state.
+
 ## Journeys
 
 Journeys = natural-language user flows the **agent** executes against the

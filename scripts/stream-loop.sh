@@ -26,6 +26,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # whole reserve -> push -> install -> capture -> release path validates with
 # no device, no GCP project, and no cost.
 DRY_RUN=0
+# Billing guard: streaming minutes burn while a device is reserved (the free
+# tier is 30 min/project/month, then $0.15/min), so the device-facing steps
+# below are capped via coreutils `timeout`. Fractions of a minute are allowed;
+# 0 disables the guard.
+MAX_MINUTES=25
 usage() {
   cat <<'EOF'
 stream-loop.sh — example real-device smoke loop for Throw Assistant
@@ -44,25 +49,38 @@ Env (required unless --dry-run):
                 from `android device remote models`, don't guess
 
 Flags:
-  --dry-run     run the whole loop against the mocks in scripts/dry-run/
-  --help, -h    print this help and exit 0
+  --dry-run       run the whole loop against the mocks in scripts/dry-run/
+  --max-minutes=N cap the device-facing steps (2-5) at N minutes (default 25;
+                  fractions allowed, 0 disables). On expiry the steps are
+                  terminated, the reservation is still released, exit 124.
+  --help, -h      print this help and exit 0
 
 Steps:
   1. reserve a real device (billed while reserved — keep it short)
   2. wait for adb, 3. install the APK, 4. launch the app,
   5. capture evidence (screenshot, UI layout, logcat) into artifacts/<ts>/
   6. journey steps are agent-driven (see journeys/throw-flow.md)
-  7. the reservation is ALWAYS released via an EXIT trap, even on failure
+  7. the reservation is ALWAYS released via an EXIT trap, even on failure;
+     --max-minutes also caps steps 2-5 so a hung adb can't burn the whole
+     streaming-minutes quota (exit 124 on expiry)
 EOF
 }
 for arg in "$@"; do
   case "$arg" in
     --dry-run) DRY_RUN=1 ;;
+    --max-minutes) echo "stream-loop.sh: error: --max-minutes needs a value: --max-minutes=N (minutes, 0 disables)" >&2; exit 2 ;;
+    --max-minutes=*) MAX_MINUTES="${arg#--max-minutes=}" ;;
     --help|-h) usage; exit 0 ;;
     -*) echo "stream-loop.sh: error: unknown flag '$arg' (try --help)" >&2; exit 2 ;;
     *)  echo "stream-loop.sh: error: unexpected argument '$arg' (try --help)" >&2; exit 2 ;;
   esac
 done
+if [[ ! "$MAX_MINUTES" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+  echo "stream-loop.sh: error: --max-minutes must be a non-negative number of minutes (0 disables), got '$MAX_MINUTES'" >&2
+  exit 2
+fi
+# Whole seconds, rounded up so a fractional request can never become a 0s timeout.
+TIMEOUT_SECS="$(awk -v m="$MAX_MINUTES" 'BEGIN { s = m * 60; printf "%d", (s > int(s) ? int(s) + 1 : int(s)) }')"
 
 if (( DRY_RUN )); then
   : "${GCP_PROJECT:=dry-run-project}"
@@ -131,30 +149,61 @@ release_device() {
 }
 trap release_device EXIT
 
-# 2. Wait for adb (create auto-connects the device; this just blocks until ready).
-adb wait-for-device
-log "device online: $(adb shell getprop ro.product.model)"
+# 2-5. Device-facing steps. Run in the main shell normally, or under the
+# billing guard below (exported as a function for that).
+device_steps() {
+  # 2. Wait for adb (create auto-connects the device; this just blocks until ready).
+  adb wait-for-device
+  log "device online: $(adb shell getprop ro.product.model)"
 
-# 3. Push + install the build
-adb install -r "$APK"
-log "installed $APK"
+  # 3. Push + install the build
+  adb install -r "$APK"
+  log "installed $APK"
 
-# 4. Launch the app
-# Launcher: .MainActivity (exported LAUNCHER; .DemoActivity is not exported)
-# applicationId verified from overlay-app/app/build.gradle (2026-10-07)
-PKG="com.bobbywasabi.overlayapp"
-adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1
-sleep 3
+  # 4. Launch the app
+  # Launcher: .MainActivity (exported LAUNCHER; .DemoActivity is not exported)
+  # applicationId verified from overlay-app/app/build.gradle (2026-10-07)
+  local pkg="com.bobbywasabi.overlayapp"
+  adb shell monkey -p "$pkg" -c android.intent.category.LAUNCHER 1
+  sleep 3
 
-# 5. Evidence: screenshot + UI tree + logcat
-# Verified 2026-10-07 against CLI 1.0.16500706: `capture` takes
-# `--annotate` and `--output=` (there is NO -o short flag — old scripts that
-# used -o silently fell through to the adb fallback below).
-android screen capture --annotate --output="${ARTIFACTS}/launch.png" || \
-  adb exec-out screencap -p > "${ARTIFACTS}/launch.png"
-android layout --pretty --output="${ARTIFACTS}/layout.txt" 2>/dev/null || true
-adb logcat -d > "${ARTIFACTS}/logcat.txt"
-log "evidence in ${ARTIFACTS}/"
+  # 5. Evidence: screenshot + UI tree + logcat
+  # Verified 2026-10-07 against CLI 1.0.16500706: `capture` takes
+  # `--annotate` and `--output=` (there is NO -o short flag — old scripts that
+  # used -o silently fell through to the adb fallback below).
+  android screen capture --annotate --output="${ARTIFACTS}/launch.png" || \
+    adb exec-out screencap -p > "${ARTIFACTS}/launch.png"
+  android layout --pretty --output="${ARTIFACTS}/layout.txt" 2>/dev/null || true
+  adb logcat -d > "${ARTIFACTS}/logcat.txt"
+  log "evidence in ${ARTIFACTS}/"
+}
+
+# Billing guard: streaming minutes burn while the device is reserved, so the
+# device-facing steps are capped with coreutils `timeout` (default TERM
+# signal). `timeout` signals only its direct child (the bash -c below, which
+# sets no traps and always dies on TERM); the parent shell is never signaled,
+# so its EXIT trap still releases the reservation on every path. (A TERM trap
+# in this shell would NOT work — bash defers trapped signals while a
+# foreground child like a hung `adb` runs, verified 2026-10-13.) Exit code is
+# timeout's 124 on expiry.
+if (( TIMEOUT_SECS > 0 )); then
+  command -v timeout >/dev/null || { echo "stream-loop.sh: error: --max-minutes needs coreutils 'timeout' on PATH" >&2; exit 2; }
+  log "billing guard: capping device steps at ${MAX_MINUTES} min (${TIMEOUT_SECS}s)"
+  export ARTIFACTS PROJECT_FLAG APK
+  export -f device_steps log
+  if timeout "$TIMEOUT_SECS" bash -c 'set -euo pipefail; device_steps'; then
+    log "device steps finished inside the billing guard"
+  else
+    code=$?
+    if (( code == 124 )); then
+      log "billing guard fired after ${MAX_MINUTES} min — steps killed, releasing reservation"
+    fi
+    exit "$code"
+  fi
+else
+  log "billing guard disabled (--max-minutes=0)"
+  device_steps
+fi
 
 # 6. Journey steps (agent-driven; see journeys/throw-flow.md).
 # Verified 2026-10-07: CLI 1.0.16500706 has NO `journey` subcommand, so the
