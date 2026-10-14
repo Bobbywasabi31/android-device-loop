@@ -28,7 +28,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DRY_RUN=0
 # Billing guard: streaming minutes burn while a device is reserved (the free
 # tier is 30 min/project/month, then $0.15/min), so the device-facing steps
-# below are capped via coreutils `timeout`. Fractions of a minute are allowed;
+# below are capped via coreutils `timeout` (or Homebrew `gtimeout` on macOS),
+# resolved pre-flight so a machine that can't enforce the guard never reserves
+# (and bills) a device. Fractions of a minute are allowed;
 # 0 disables the guard.
 MAX_MINUTES=25
 usage() {
@@ -53,6 +55,9 @@ Flags:
   --max-minutes=N cap the device-facing steps (2-5) at N minutes (default 25;
                   fractions allowed, 0 disables). On expiry the steps are
                   terminated, the reservation is still released, exit 124.
+                  Needs coreutils 'timeout' on PATH ('gtimeout' works too,
+                  e.g. via 'brew install coreutils' on macOS); the script
+                  checks this before reserving any device.
   --help, -h      print this help and exit 0
 
 Steps:
@@ -81,6 +86,25 @@ if [[ ! "$MAX_MINUTES" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
 fi
 # Whole seconds, rounded up so a fractional request can never become a 0s timeout.
 TIMEOUT_SECS="$(awk -v m="$MAX_MINUTES" 'BEGIN { s = m * 60; printf "%d", (s > int(s) ? int(s) + 1 : int(s)) }')"
+
+# Resolve the guard binary once, up front: plain `timeout` on Linux, or
+# Homebrew coreutils' `gtimeout` on macOS (GNU tools install g-prefixed by
+# default unless gnubin is on PATH). Pre-flight on purpose — it runs BEFORE
+# the device reservation below, so a machine that can't enforce the billing
+# guard never reserves (and bills) a device it can't cap.
+resolve_timeout_bin() {
+  if command -v timeout >/dev/null 2>&1; then echo timeout; return 0; fi
+  if command -v gtimeout >/dev/null 2>&1; then echo gtimeout; return 0; fi
+  return 1
+}
+TIMEOUT_BIN=""
+if (( TIMEOUT_SECS > 0 )); then
+  TIMEOUT_BIN="$(resolve_timeout_bin)" || {
+    echo "stream-loop.sh: error: --max-minutes needs coreutils 'timeout' on PATH" >&2
+    echo "stream-loop.sh: hint: macOS: 'brew install coreutils' exposes it as 'gtimeout'; or pass --max-minutes=0 to run uncapped" >&2
+    exit 2
+  }
+fi
 
 if (( DRY_RUN )); then
   : "${GCP_PROJECT:=dry-run-project}"
@@ -179,19 +203,18 @@ device_steps() {
 }
 
 # Billing guard: streaming minutes burn while the device is reserved, so the
-# device-facing steps are capped with coreutils `timeout` (default TERM
-# signal). `timeout` signals only its direct child (the bash -c below, which
-# sets no traps and always dies on TERM); the parent shell is never signaled,
-# so its EXIT trap still releases the reservation on every path. (A TERM trap
-# in this shell would NOT work — bash defers trapped signals while a
-# foreground child like a hung `adb` runs, verified 2026-10-13.) Exit code is
-# timeout's 124 on expiry.
+# device-facing steps are capped with the pre-flight-resolved $TIMEOUT_BIN
+# (default TERM signal). $TIMEOUT_BIN signals only its direct child (the
+# bash -c below, which sets no traps and always dies on TERM); the parent
+# shell is never signaled, so its EXIT trap still releases the reservation on
+# every path. (A TERM trap in this shell would NOT work — bash defers trapped
+# signals while a foreground child like a hung `adb` runs, verified
+# 2026-10-13.) Exit code is the guard's 124 on expiry.
 if (( TIMEOUT_SECS > 0 )); then
-  command -v timeout >/dev/null || { echo "stream-loop.sh: error: --max-minutes needs coreutils 'timeout' on PATH" >&2; exit 2; }
-  log "billing guard: capping device steps at ${MAX_MINUTES} min (${TIMEOUT_SECS}s)"
+  log "billing guard: capping device steps at ${MAX_MINUTES} min (${TIMEOUT_SECS}s) via ${TIMEOUT_BIN}"
   export ARTIFACTS PROJECT_FLAG APK
   export -f device_steps log
-  if timeout "$TIMEOUT_SECS" bash -c 'set -euo pipefail; device_steps'; then
+  if "$TIMEOUT_BIN" "$TIMEOUT_SECS" bash -c 'set -euo pipefail; device_steps'; then
     log "device steps finished inside the billing guard"
   else
     code=$?

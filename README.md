@@ -123,7 +123,10 @@ A hung `adb`/`android` CLI gets the same treatment via the billing guard:
 `timeout` — streaming minutes burn while a device is reserved (30 free
 min/project/month, then $0.15/min), so one stuck run can never eat the whole
 quota. On expiry the steps are terminated, the script exits 124, and the
-`EXIT` trap still releases the reservation; `0` disables the guard. The test
+`EXIT` trap still releases the reservation; `0` disables the guard. The guard
+binary is resolved pre-flight (before any device is reserved), so a machine
+without it fails fast with exit 2 and never bills a minute; Homebrew
+coreutils' `gtimeout` is accepted on macOS (`brew install coreutils`). The test
 covers the timeout path via `ANDROID_MOCK_HANG_AT` (the mock sleeps instead
 of answering), asserting exit 124 and an empty mock reservation state.
 

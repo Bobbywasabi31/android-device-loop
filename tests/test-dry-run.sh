@@ -192,4 +192,57 @@ grep -q 'billing guard: capping' /tmp/dry-run-mm0-stdout.txt \
   && fail "--max-minutes=0 still capped the run"
 pass "--max-minutes=0 disables the billing guard (loop still exits 0)"
 
+# --- part 6: pre-flight timeout check + gtimeout fallback ------------------
+# The billing guard needs coreutils `timeout`. The availability check is a
+# pre-flight (before the device reservation): a machine without it must fail
+# fast with exit 2 and never reserve a billed device. On macOS, Homebrew
+# coreutils installs it as `gtimeout`, which the script accepts as a fallback.
+command -v timeout >/dev/null \
+  || fail "test env needs coreutils timeout to build the restricted PATH"
+REAL_TIMEOUT="$(command -v timeout)"
+RESTRICTED="$(mktemp -d)"
+IFS=: read -ra PATHDIRS <<< "$PATH"
+for d in "${PATHDIRS[@]}"; do
+  [ -d "$d" ] || continue
+  for f in "$d"/*; do
+    [ -e "$f" ] || continue
+    b="${f##*/}"
+    case "$b" in timeout|gtimeout) continue ;; esac
+    [ -e "$RESTRICTED/$b" ] || ln -s "$f" "$RESTRICTED/$b" 2>/dev/null || true
+  done
+done
+pass "built a restricted PATH without timeout/gtimeout"
+
+rm -rf artifacts
+set +e
+PATH="$RESTRICTED" bash scripts/stream-loop.sh --dry-run --max-minutes=5 > /tmp/dry-run-no-timeout.txt 2>&1
+CODE=$?
+set -e
+[ "$CODE" -eq 2 ] || { cat /tmp/dry-run-no-timeout.txt >&2; fail "expected exit 2 without timeout on PATH, got $CODE"; }
+grep -q "needs coreutils 'timeout'" /tmp/dry-run-no-timeout.txt \
+  || fail "missing-timeout error message absent"
+grep -q "brew install coreutils" /tmp/dry-run-no-timeout.txt \
+  || fail "macOS hint absent from the missing-timeout error"
+pass "missing timeout fails fast (exit 2, helpful error incl. macOS hint)"
+
+# Fail-fast must happen BEFORE the reservation: the pre-flight check fires
+# before the artifacts dir is even created, so nothing must exist at all.
+[ -e artifacts ] && fail "artifacts dir was created before the timeout pre-flight check"
+pass "no device reserved and no side effects when timeout is unavailable (check runs pre-flight)"
+
+# gtimeout fallback: hide `timeout`, provide a `gtimeout` shim pointing at the
+# real binary — the full loop must exit 0 and the guard must use the shim.
+SHIMDIR="$(mktemp -d)"
+cat > "$SHIMDIR/gtimeout" <<EOF
+#!/usr/bin/env bash
+exec "$REAL_TIMEOUT" "\$@"
+EOF
+chmod +x "$SHIMDIR/gtimeout"
+rm -rf artifacts
+PATH="$SHIMDIR:$RESTRICTED" bash scripts/stream-loop.sh --dry-run --max-minutes=2 > /tmp/dry-run-gtimeout.txt 2>&1 \
+  || { cat /tmp/dry-run-gtimeout.txt >&2; fail "gtimeout fallback: loop exited nonzero"; }
+grep -q 'billing guard: capping.*via gtimeout' /tmp/dry-run-gtimeout.txt \
+  || fail "guard did not report using gtimeout"
+pass "gtimeout accepted as the billing-guard binary (macOS-style PATH)"
+
 echo "ALL DRY-RUN CHECKS PASSED"
