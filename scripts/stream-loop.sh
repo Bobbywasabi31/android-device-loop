@@ -68,6 +68,11 @@ Steps:
   7. the reservation is ALWAYS released via an EXIT trap, even on failure;
      --max-minutes also caps steps 2-5 so a hung adb can't burn the whole
      streaming-minutes quota (exit 124 on expiry)
+
+  Each numbered step is timed into artifacts/<ts>/steps.log (tab-separated:
+  step, label, UTC start, duration seconds) so a billed run can be audited
+  for where the streaming minutes went; step durations also print in the
+  console log ("step N: <label> done in Ns").
 EOF
 }
 for arg in "$@"; do
@@ -120,6 +125,7 @@ fi
 PROJECT_FLAG="--project=${GCP_PROJECT}"
 ARTIFACTS="artifacts/$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$ARTIFACTS"
+printf '# step\tlabel\tstart_utc\tduration_s\n' > "${ARTIFACTS}/steps.log"
 
 if (( DRY_RUN )); then
   export ANDROID_MOCK_STATE="$ARTIFACTS/mock-state"
@@ -129,6 +135,31 @@ if (( DRY_RUN )); then
 fi
 
 log() { echo "[stream-loop] $*"; }
+
+# --- per-step timing ---------------------------------------------------------
+# Each numbered step is timed into ${ARTIFACTS}/steps.log (tab-separated:
+# num, label, UTC start, duration seconds) so a billed run can be audited for
+# where the streaming minutes went. This complements the --max-minutes guard:
+# when the guard fires, the log shows which step ate the time. A step that
+# dies under `set -e` simply has no closing row — its start line stays in the
+# console output, which is where it died.
+step_start() { # step_start <num> <label>
+  STEP_NUM="$1"; STEP_LABEL="$2"
+  STEP_T0="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  STEP_EPOCH="$(date +%s)"
+  log "step ${STEP_NUM}: ${STEP_LABEL} ..."
+}
+step_end() { # step_end — closes the most recent step_start
+  if [ -z "${STEP_NUM:-}" ]; then
+    echo "[stream-loop] error: step_end with no step open (step_start/step_end mismatch)" >&2
+    return 1
+  fi
+  local dur; dur=$(( $(date +%s) - STEP_EPOCH ))
+  log "step ${STEP_NUM}: ${STEP_LABEL} done in ${dur}s"
+  printf '%s\t%s\t%s\t%s\n' "$STEP_NUM" "$STEP_LABEL" "$STEP_T0" "$dur" >> "${ARTIFACTS}/steps.log"
+  STEP_NUM=""; STEP_LABEL=""; STEP_T0=""; STEP_EPOCH=""
+  return 0
+}
 
 if (( DRY_RUN )); then
   log "DRY RUN — mocking android/adb from scripts/dry-run/: no device, no GCP project, no cost."
@@ -146,7 +177,7 @@ fi
 #   documented, so resolve the id via list --short diff, with a regex fallback).
 # - auto-connect to adb is the DEFAULT (--connect=true); --connect=false
 #   reserves only (then run `android device remote connect <id> --project=...`).
-log "reserving ${MODEL} (auto-connects to adb on success) ..."
+step_start 1 "reserve device (${MODEL}, auto-connects to adb)"
 BEFORE_IDS="$(android device remote list --short ${PROJECT_FLAG} 2>/dev/null || true)"
 CREATE_OUT="$(android device remote create "${MODEL}" --connect ${PROJECT_FLAG})"
 echo "$CREATE_OUT" | tee "${ARTIFACTS}/create-output.txt"
@@ -158,6 +189,7 @@ if [ -z "$RES_ID" ]; then
 fi
 : "${RES_ID:?could not resolve reservation id; see ${ARTIFACTS}/create-output.txt}"
 log "reservation id: ${RES_ID}"
+step_end
 
 # ALWAYS release the reservation, even if the loop dies midway: a failed
 # install (or any later step) under `set -e` would otherwise leave the device
@@ -177,20 +209,27 @@ trap release_device EXIT
 # billing guard below (exported as a function for that).
 device_steps() {
   # 2. Wait for adb (create auto-connects the device; this just blocks until ready).
+  step_start 2 "wait for adb"
   adb wait-for-device
   log "device online: $(adb shell getprop ro.product.model)"
+  step_end
 
   # 3. Push + install the build
+  step_start 3 "install APK"
   adb install -r "$APK"
   log "installed $APK"
+  step_end
 
   # 4. Launch the app
   # Launcher: .MainActivity (exported LAUNCHER; .DemoActivity is not exported)
   # applicationId verified from overlay-app/app/build.gradle (2026-10-07)
+  step_start 4 "launch app"
   local pkg="com.bobbywasabi.overlayapp"
   adb shell monkey -p "$pkg" -c android.intent.category.LAUNCHER 1
   sleep 3
+  step_end
 
+  step_start 5 "capture evidence"
   # 5. Evidence: screenshot + UI tree + logcat
   # Verified 2026-10-07 against CLI 1.0.16500706: `capture` takes
   # `--annotate` and `--output=` (there is NO -o short flag — old scripts that
@@ -200,6 +239,7 @@ device_steps() {
   android layout --pretty --output="${ARTIFACTS}/layout.txt" 2>/dev/null || true
   adb logcat -d > "${ARTIFACTS}/logcat.txt"
   log "evidence in ${ARTIFACTS}/"
+  step_end
 }
 
 # Billing guard: streaming minutes burn while the device is reserved, so the
@@ -213,7 +253,7 @@ device_steps() {
 if (( TIMEOUT_SECS > 0 )); then
   log "billing guard: capping device steps at ${MAX_MINUTES} min (${TIMEOUT_SECS}s) via ${TIMEOUT_BIN}"
   export ARTIFACTS PROJECT_FLAG APK
-  export -f device_steps log
+  export -f device_steps log step_start step_end
   if "$TIMEOUT_BIN" "$TIMEOUT_SECS" bash -c 'set -euo pipefail; device_steps'; then
     log "device steps finished inside the billing guard"
   else

@@ -114,6 +114,16 @@ RES="$LATEST/mock-state/reservations.txt"
 [ -s "$RES" ] && fail "reservation NOT released after mid-loop failure: $(cat "$RES")"
 pass "reservation released after mid-loop failure (mock state empty)"
 
+# The timing log on the failure path: steps 1-2 closed normally, step 3
+# (install) has no closing row — its start line stays in the console, which is
+# where it died.
+FSTEPS="$LATEST/steps.log"
+[ -f "$FSTEPS" ] || fail "steps.log missing on the failure path"
+[ "$(grep -cv '^#' "$FSTEPS")" -eq 2 ] || fail "steps.log on the failure path should hold exactly the 2 completed rows"
+grep -q "step 3: install APK \.\.\." /tmp/dry-run-fail-stdout.txt \
+  || fail "failure path: console missing the step 3 start line"
+pass "failure path: steps.log holds the completed rows; the dead step's start line is in the console"
+
 # --- part 4: --help + unknown flags ---------------------------------------
 # A bare `stream-loop.sh` (no env) dies on the GCP_PROJECT guard with no
 # guidance; --help must document usage before any requirement is enforced,
@@ -244,5 +254,29 @@ PATH="$SHIMDIR:$RESTRICTED" bash scripts/stream-loop.sh --dry-run --max-minutes=
 grep -q 'billing guard: capping.*via gtimeout' /tmp/dry-run-gtimeout.txt \
   || fail "guard did not report using gtimeout"
 pass "gtimeout accepted as the billing-guard binary (macOS-style PATH)"
+
+# --- part 7: per-step timing --------------------------------------------------
+# Each numbered step is timed into steps.log (complements the --max-minutes
+# guard: when the guard fires, the log shows which step ate the minutes).
+# Uses the gtimeout run's artifacts above (guard engaged, steps ran in the
+# timeout's child shell — the export -f path).
+LATEST="$(ls -dt artifacts/*/ 2>/dev/null | head -1)"
+[ -n "$LATEST" ] || fail "no artifacts dir for the timing checks"
+STEPS="$LATEST/steps.log"
+[ -f "$STEPS" ] || fail "steps.log missing"
+[ "$(grep -cv '^#' "$STEPS")" -eq 5 ] || fail "steps.log should have 5 timed rows, got: $(grep -cv '^#' "$STEPS")"
+[ "$(awk -F'\t' '!/^#/ {printf "%s ", $1}' "$STEPS")" = "1 2 3 4 5 " ] \
+  || fail "steps.log rows are not steps 1..5 in order"
+while IFS="$(printf '\t')" read -r num label start dur _; do
+  case "$num" in ''|'#'*) continue ;; esac
+  [ -n "$label" ] || fail "steps.log: empty label for step $num"
+  case "$dur" in ''|*[!0-9]*) fail "steps.log: bad duration '$dur' for step $num" ;; esac
+done < "$STEPS"
+pass "steps.log has 5 ordered rows (1=reserve … 5=evidence) with integer durations"
+for n in 1 2 3 4 5; do
+  grep -q "step $n: .* done in [0-9]*s" /tmp/dry-run-gtimeout.txt \
+    || fail "console missing 'step $n … done in Ns' line"
+done
+pass "console reports each step's duration"
 
 echo "ALL DRY-RUN CHECKS PASSED"

@@ -130,6 +130,13 @@ coreutils' `gtimeout` is accepted on macOS (`brew install coreutils`). The test
 covers the timeout path via `ANDROID_MOCK_HANG_AT` (the mock sleeps instead
 of answering), asserting exit 124 and an empty mock reservation state.
 
+Each numbered step is also timed into `artifacts/<ts>/steps.log`
+(tab-separated: step number, label, UTC start, duration seconds; step
+durations print in the console log too), so a billed run can be audited for
+where the streaming minutes went — when the billing guard fires, the log shows
+which step ate the time. A step that dies under `set -e` has no closing row;
+its start line stays in the console, which is where it died.
+
 ## Journeys
 
 Journeys = natural-language user flows the **agent** executes against the
