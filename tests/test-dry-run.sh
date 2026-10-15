@@ -270,6 +270,10 @@ STEPS="$LATEST/steps.log"
 while IFS="$(printf '\t')" read -r num label start dur _; do
   case "$num" in ''|'#'*) continue ;; esac
   [ -n "$label" ] || fail "steps.log: empty label for step $num"
+  case "$start" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
+    *) fail "steps.log: bad start timestamp '$start' for step $num" ;;
+  esac
   case "$dur" in ''|*[!0-9]*) fail "steps.log: bad duration '$dur' for step $num" ;; esac
 done < "$STEPS"
 pass "steps.log has 5 ordered rows (1=reserve … 5=evidence) with integer durations"
